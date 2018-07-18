@@ -31,6 +31,7 @@ jsonwebtoken = { version = "4.0", optional = true }
 libc = "0.2.10"
 local-encoding = "0.2.0"
 log = "0.3.6"
+lmdb  = { version = "0.8.0", optional = true }
 lru-disk-cache = { path = "lru-disk-cache", version = "0.2.0" }
 memcached-rs = { version = "0.1" , optional = true }
 native-tls = "0.1"
@@ -79,7 +80,7 @@ winapi = "0.2"
 mio-named-pipes = "0.1"
 
 [features]
-default = ["s3"]
+default = ["s3", "the_lmdb"]
 all = ["redis", "s3", "memcached", "gcs", "azure"]
 # gcs requires openssl, which is a pain on Windows.
 all-windows = ["redis", "s3", "memcached", "azure"]
@@ -88,6 +89,7 @@ s3 = ["chrono", "hyper", "hyper-tls", "rust-crypto", "simple-s3"]
 simple-s3 = []
 gcs = ["chrono", "hyper", "hyper-tls", "jsonwebtoken", "openssl", "url"]
 memcached = ["memcached-rs"]
+the_lmdb = ["lmdb"]
 # Enable features that require unstable features of Nightly Rust.
 unstable = []
 

@@ -44,6 +44,8 @@ extern crate jsonwebtoken as jwt;
 extern crate kernel32;
 #[macro_use]
 extern crate lazy_static;
+#[cfg(feature = "the_lmdb")]
+extern crate lmdb;
 extern crate local_encoding;
 #[macro_use]
 extern crate log;

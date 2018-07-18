@@ -24,5 +24,7 @@ pub mod redis;
 pub mod s3;
 #[cfg(feature = "gcs")]
 pub mod gcs;
+#[cfg(feature="the_lmdb")]
+pub mod lmdb;
 
 pub use cache::cache::*;
