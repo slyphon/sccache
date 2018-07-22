@@ -6,6 +6,7 @@ use cache::{
 };
 use errors::*;
 use futures_cpupool::CpuPool;
+use lmdb;
 use lmdb::{Database, Environment, Transaction, WriteFlags};
 use std::io::Cursor;
 use std::path::Path;
@@ -21,6 +22,7 @@ pub struct LMDBCache {
     pool: CpuPool,
     path: String,
     db: Arc<Database>,
+    map_size: u64,
 }
 
 trait ResultExt<T, E> {
@@ -57,6 +59,7 @@ impl LMDBCache {
             env: Arc::new(env),
             db: Arc::new(db),
             path: path.to_str().expect("path converts to string").to_owned(),
+            map_size,
         })
     }
 
@@ -64,9 +67,20 @@ impl LMDBCache {
         let tx = self.env.begin_ro_txn()?;
 
         let res =
-            tx.get(*self.db, &k)
-                .map_err(|e| e.into())
-                .and_then(|vb| CacheRead::from(Cursor::new(Vec::from(vb))).map(Cache::Hit));
+            match tx.get(*self.db, &k) {
+                Ok(vb) => {
+                    trace!("lmdb cache hit!");
+                    CacheRead::from(Cursor::new(Vec::from(vb))).map(Cache::Hit)
+                },
+                Err(lmdb::Error::NotFound) => {
+                    trace!("lmdb cache miss!");
+                    Ok(Cache::Miss)
+                },
+                Err(e) => {
+                    warn!("lmdb error: {:?}", e);
+                    Err(e.into())
+                },
+            };
 
         tx.commit()?;
 
@@ -74,6 +88,7 @@ impl LMDBCache {
     }
 
     fn put(&self, k: Vec<u8>, entry: CacheWrite) -> Result<Duration> {
+        trace!("LMDBCache.put, key len: {}", k.len());
         let start = Instant::now();
         let d = entry.finish()?;
         let mut tx = self.env.begin_rw_txn()?;
@@ -116,6 +131,12 @@ impl Storage for LMDBCache {
     }
 
     fn location(&self) -> String { self.path.to_owned() }
-    fn current_size(&self) -> Option<u64> { None }
-    fn max_size(&self) -> Option<u64> { None }
+
+    fn current_size(&self) -> Option<u64> {
+        ::std::fs::metadata(&self.path)
+            .ok()
+            .map(|md| md.len())
+    }
+
+    fn max_size(&self) -> Option<u64> { Some(self.map_size) }
 }

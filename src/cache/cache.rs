@@ -324,7 +324,7 @@ pub fn storage_from_environment(pool: &CpuPool, _handle: &Handle) -> Arc<Storage
     if cfg!(feature = "the_lmdb") {
         if let Some(path) = env::var_os("SCCACHE_LMDB_DIR") {
             let pb = PathBuf::from(path);
-            debug!("Trying lmdb backend, path {:?}", path)
+            debug!("Trying lmdb backend, path {:?}", pb);
             let map_size = parse_size("10G").unwrap();
             match LMDBCache::new(&pb, map_size as u64, pool) {
                 Ok(cache) => {
