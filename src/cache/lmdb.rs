@@ -6,17 +6,13 @@ use cache::{
 };
 use errors::*;
 use futures_cpupool::CpuPool;
-use lmdb;
-use lmdb::Database;
-use lmdb::DatabaseFlags;
-use lmdb::Environment;
-use lmdb::EnvironmentBuilder;
-use std::cell::RefCell;
+use lmdb::{Database, Environment, Transaction, WriteFlags};
 use std::io::Cursor;
 use std::path::Path;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+use std::result::{Result as SResult};
+use std::time::Instant;
 
 
 #[derive(Clone)]
@@ -27,11 +23,31 @@ pub struct LMDBCache {
     db: Arc<Database>,
 }
 
+trait ResultExt<T, E> {
+    fn ensure<F>(self, f: F) -> SResult<T, E>
+        where F: FnOnce();
+
+    fn transform<F, U, R>(self, f: F) -> SResult<U, R>
+        where F: FnOnce(SResult<T, E>) -> SResult<U, R>;
+}
+
+impl<T, E> ResultExt<T, E> for SResult<T, E> {
+    fn ensure<F: FnOnce()>(self, f: F) -> SResult<T, E> {
+        f();
+        self
+    }
+
+    fn transform<F, U, R>(self, f: F) -> SResult<U, R>
+        where F: FnOnce(SResult<T, E>) -> SResult<U, R>
+    {
+        f(self)
+    }
+}
 
 impl LMDBCache {
-    pub fn new(path: &Path, map_size: usize, cpu_pool: &CpuPool) -> Result<LMDBCache> {
-        let mut env = Environment::new()
-            .set_map_size(map_size)
+    pub fn new(path: &Path, map_size: u64, cpu_pool: &CpuPool) -> Result<LMDBCache> {
+        let env = Environment::new()
+            .set_map_size(map_size as usize)
             .open(path)?;
 
         let db = env.open_db(None)?;
@@ -43,47 +59,63 @@ impl LMDBCache {
             path: path.to_str().expect("path converts to string").to_owned(),
         })
     }
-}
 
-trait ResultExt<T> {
-    fn transform<F, U>(self, f: F) -> Result<U>
-        where F: FnOnce(Result<T>) -> Result<U>;
-}
+    fn get(&self, k: Vec<u8>) -> Result<Cache> {
+        let tx = self.env.begin_ro_txn()?;
 
-impl<T> ResultExt<T> for Result<T> {
-    fn transform<F, U>(self, f: F) -> Result<U>
-        where F: FnOnce(Result<T>) -> Result<U>
-    {
-        f(self)
+        let res =
+            tx.get(*self.db, &k)
+                .map_err(|e| e.into())
+                .and_then(|vb| CacheRead::from(Cursor::new(Vec::from(vb))).map(Cache::Hit));
+
+        tx.commit()?;
+
+        res
+    }
+
+    fn put(&self, k: Vec<u8>, entry: CacheWrite) -> Result<Duration> {
+        let start = Instant::now();
+        let d = entry.finish()?;
+        let mut tx = self.env.begin_rw_txn()?;
+
+        let res = {
+            tx.put(*self.db, &k, &d, WriteFlags::empty())
+        };
+
+        let rv =
+            match res {
+                ok @ Ok(()) => { tx.commit()?; ok },
+                err @ Err(_) => { tx.abort(); err },
+            };
+
+        rv
+            .map(|_| start.elapsed())
+            .map_err(|e| e.into())
     }
 }
 
 impl Storage for LMDBCache {
     fn get(&self, key: &str) -> SFuture<Cache> {
-        let key = key.to_owned();
-        let kb = key.as_bytes();
+        let kb = Vec::from(key);
         let me = self.clone();
-        self.pool.spawn_fn(move || {
-            let tx = me.env.begin_ro_txn()?;
-            tx.get(*me.db, kb)
-                .map(|vbytes| CacheRead::from(Cursor::new(Vec::from(vbytes))))
-                .map(Cache::Hit)
-                .transform(|r| {
-                    match r {
-                        ok @ Ok(_) => ok,
-                        Err(lmdb::Error::NotFound) => Ok(Cache::Miss),
-                        err @ Err(_) => err,
-                    }
-                })
-        })
-
+        Box::new(
+            self.pool.spawn_fn(move || {
+                me.get(kb)
+            })
+        )
     }
 
     fn put(&self, key: &str, entry: CacheWrite) -> SFuture<Duration> {
-        unimplemented!()
+        let k = Vec::from(key);
+        let me = self.clone();
+        Box::new(
+            self.pool.spawn_fn(move || {
+                me.put(k, entry)
+            })
+        )
     }
 
-    fn location(&self) -> String { self.path }
+    fn location(&self) -> String { self.path.to_owned() }
     fn current_size(&self) -> Option<u64> { None }
     fn max_size(&self) -> Option<u64> { None }
 }

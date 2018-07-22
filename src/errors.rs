@@ -24,6 +24,8 @@ use futures::future;
 use hyper;
 #[cfg(feature = "jsonwebtoken")]
 use jwt;
+#[cfg(feature = "the_lmdb")]
+use lmdb;
 use lru_disk_cache;
 #[cfg(feature = "memcached")]
 use memcached;
@@ -39,6 +41,7 @@ error_chain! {
     foreign_links {
         Hyper(hyper::Error) #[cfg(feature = "hyper")];
         Io(io::Error);
+        LMDB(lmdb::Error) #[cfg(feature = "the_lmdb")];
         Lru(lru_disk_cache::Error);
         Json(serde_json::Error);
         Jwt(jwt::errors::Error) #[cfg(feature = "jsonwebtoken")];

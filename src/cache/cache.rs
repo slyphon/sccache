@@ -23,6 +23,8 @@ use cache::redis::RedisCache;
 use cache::s3::S3Cache;
 #[cfg(feature = "gcs")]
 use cache::gcs::{self, GCSCache, GCSCredentialProvider, RWMode};
+#[cfg(feature = "the_lmdb")]
+use cache::lmdb::LMDBCache;
 use directories::ProjectDirs;
 use futures_cpupool::CpuPool;
 use regex::Regex;
@@ -315,6 +317,21 @@ pub fn storage_from_environment(pool: &CpuPool, _handle: &Handle) -> Arc<Storage
                     return Arc::new(storage);
                 }
                 Err(e) => warn!("Failed to create Azure cache: {:?}", e),
+            }
+        }
+    }
+
+    if cfg!(feature = "the_lmdb") {
+        if let Some(path) = env::var_os("SCCACHE_LMDB_DIR") {
+            let pb = PathBuf::from(path);
+            debug!("Trying lmdb backend, path {:?}", path)
+            let map_size = parse_size("10G").unwrap();
+            match LMDBCache::new(&pb, map_size as u64, pool) {
+                Ok(cache) => {
+                    trace!("Using lmdb");
+                    return Arc::new(cache);
+                },
+                Err(e) => warn!("Failed to set up ldmb backend: {:?}", e),
             }
         }
     }
